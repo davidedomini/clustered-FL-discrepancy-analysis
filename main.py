@@ -114,8 +114,28 @@ def train_n_epochs(model, train_data_loader, epochs):
 
     return model.state_dict()
 
+def eval(model, eval_data_loader):
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in eval_data_loader:
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    return correct / total
 
-def plot_data(dataframe):
+def eval_loss(model, eval_data_loader):
+    model.eval()
+    criterion = nn.NLLLoss()
+    loss = 0
+    with torch.no_grad():
+        for images, labels in eval_data_loader:
+            outputs = model(images)
+            loss += criterion(outputs, labels).item()
+    return loss
+def plot_data_discrepancy(dataframe):
     plt.figure(figsize=(10, 6))
     plt.plot(df['Epochs'], df['Discrepancy0_1'], label='Discrepancy0_1', marker='o')
     plt.plot(df['Epochs'], df['Discrepancy0_8'], label='Discrepancy0_8', marker='s')
@@ -126,6 +146,16 @@ def plot_data(dataframe):
     plt.legend()
     plt.savefig('discrepancy.png', dpi=500)
 
+def plot_data_eval(dataframe):
+    plt.figure(figsize=(10, 6))
+    plt.plot(df['Epochs'], df['Eval0_1'], label='Eval0_1', marker='o')
+    plt.plot(df['Epochs'], df['Eval0_8'], label='Eval0_8', marker='s')
+    plt.plot(df['Epochs'], df['Eval1_8'], label='Eval1_8', marker='^')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.grid(True)
+    plt.legend()
+    plt.savefig('accuracy.png', dpi=500)
 if __name__ == '__main__':
     train_dataset, test_dataset = get_train_test_dataset()
     mapping = dataset_to_nodes_partitioning(10, 2, 42)
@@ -136,26 +166,39 @@ if __name__ == '__main__':
 
     df = pd.DataFrame(columns=['Epochs', 'Discrepancy0_1', 'Discrepancy0_8', 'Discrepancy1_8'])
 
-    for i in [1, 2, 5, 8, 10]:
+def initialize_model():
+    model = CNNMnist()
+    model.load_state_dict(torch.load('initialmodel'))
+    return model
 
-        print(f'Epochs: {i}')
+def total_eval_loss(model1, model2, dataset1, dataset2):
+    return eval_loss(model1, dataset2) + eval_loss(model2, dataset1)
 
-        model0 = CNNMnist()
-        model1 = CNNMnist()
-        model8 = CNNMnist()
+def calculate_discrepancy(model1, model2):
+    return discrepancy(train_n_epochs(model1, dataset0, i), train_n_epochs(model2, dataset1, i))
 
-        model0.load_state_dict(torch.load('initialmodel'))
-        model1.load_state_dict(torch.load('initialmodel'))
-        model8.load_state_dict(torch.load('initialmodel'))
+for i in [1, 2, 5, 8, 10]:
+    print(f'Epochs: {i}')
 
-        model0_weigths = train_n_epochs(model0, dataset0, i)
-        model1_weigths = train_n_epochs(model1, dataset1, i)
-        model8_weigths = train_n_epochs(model8, dataset8, i)
+    model0, model1, model8 = initialize_model(), initialize_model(), initialize_model()
 
-        discrepancy0_1 = discrepancy(model0_weigths, model1_weigths)
-        discrepancy0_8 = discrepancy(model0_weigths, model8_weigths)
-        discrepancy1_8 = discrepancy(model1_weigths, model8_weigths)
+    discrepancy0_1 = calculate_discrepancy(model0, model1)
+    discrepancy0_8 = calculate_discrepancy(model0, model8)
+    discrepancy1_8 = calculate_discrepancy(model1, model8)
 
-        df = df._append({'Epochs': i, 'Discrepancy0_1': discrepancy0_1, 'Discrepancy0_8': discrepancy0_8, 'Discrepancy1_8': discrepancy1_8}, ignore_index=True)
+    total_eval0_1 = total_eval_loss(model0, model1, dataset0, dataset1)
+    total_eval0_8 = total_eval_loss(model0, model8, dataset0, dataset8)
+    total_eval1_8 = total_eval_loss(model1, model8, dataset1, dataset8)
 
-    plot_data(df)
+    df = df.append({
+        'Epochs': i,
+        'Discrepancy0_1': discrepancy0_1,
+        'Discrepancy0_8': discrepancy0_8,
+        'Discrepancy1_8': discrepancy1_8,
+        'Eval0_1': total_eval0_1,
+        'Eval0_8': total_eval0_8,
+        'Eval1_8': total_eval1_8
+    }, ignore_index=True)
+
+plot_data_discrepancy(df)
+plot_data_eval(df)
